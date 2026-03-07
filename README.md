@@ -1,1 +1,3 @@
-# solana-startup-terminal
+**Solana startup terminal**
+---
+Практичні завдання для лецій по Dev Track. 
