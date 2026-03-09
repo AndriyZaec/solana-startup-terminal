@@ -1,0 +1,6 @@
+/target
+.env
+*.pem
+.DS_Store
+.idea/
+.vscode/

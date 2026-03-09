@@ -1,0 +1,16 @@
+[package]
+name = "accounts"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+solana-client.workspace = true
+solana-sdk.workspace = true
+solana-cli-config.workspace = true
+anyhow.workspace = true
+
+bincode.workspace = true
+chrono.workspace = true
+borsh.workspace = true
+
+mpl-token-metadata.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "transactions"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+solana-client.workspace = true
+solana-sdk.workspace = true
+solana-cli-config.workspace = true
+anyhow.workspace = true
+
+solana-system-interface.workspace = true
+solana-compute-budget-interface.workspace = true
