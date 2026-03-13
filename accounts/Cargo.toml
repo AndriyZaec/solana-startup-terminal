@@ -7,6 +7,7 @@ edition = "2024"
 solana-client.workspace = true
 solana-sdk.workspace = true
 solana-cli-config.workspace = true
+solana-system-interface.workspace = true
 anyhow.workspace = true
 
 bincode.workspace = true
@@ -14,3 +15,5 @@ chrono.workspace = true
 borsh.workspace = true
 
 mpl-token-metadata.workspace = true
+spl-token.workspace = true
+spl-associated-token-account.workspace = true
