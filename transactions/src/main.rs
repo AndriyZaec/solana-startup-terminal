@@ -101,7 +101,35 @@ fn tree_reciver_tx(client: &RpcClient, signer: &Keypair) -> anyhow::Result<Signa
     let ix_2 = transfer(&signer.pubkey(), &reciver2, transfer_amount);
     let ix_3 = transfer(&signer.pubkey(), &reciver3.pubkey(), transfer_amount);
 
-    send_tx(client, signer, &[ix_1, ix_2, ix_3])
+    let recent_blockhash = client
+        .get_latest_blockhash()
+        .map_err(|e| anyhow!("Failed to fetcu blockhash: {e}"))?;
+    let tx = Transaction::new_signed_with_payer(
+        &[ix_1, ix_2, ix_3],
+        Some(&signer.pubkey()),
+        &[signer],
+        recent_blockhash,
+    );
+
+    let sim = client
+        .simulate_transaction_with_config(
+            &tx,
+            solana_client::rpc_config::RpcSimulateTransactionConfig {
+                sig_verify: true,
+                replace_recent_blockhash: false,
+                commitment: Some(CommitmentConfig::processed()),
+                ..Default::default()
+            },
+        )
+        .map_err(|e| anyhow!("Failed to simulate: {e}"))?;
+
+    println!("err: {:?}", sim.value.err);
+    println!("logs: {:?}", sim.value.logs);
+    println!("units consumed: {:?}", sim.value.units_consumed);
+
+    client
+        .send_and_confirm_transaction(&tx)
+        .map_err(|e| anyhow!("Failed to send tx: {e}"))
 }
 
 fn main() -> anyhow::Result<()> {
