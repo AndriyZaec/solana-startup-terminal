@@ -1,4 +1,7 @@
-use std::str::FromStr;
+use std::{
+    str::FromStr,
+    time::{Duration, Instant},
+};
 
 use anyhow::{anyhow, Ok};
 use solana_cli_config::Config;
@@ -132,12 +135,54 @@ fn tree_reciver_tx(client: &RpcClient, signer: &Keypair) -> anyhow::Result<Signa
         .map_err(|e| anyhow!("Failed to send tx: {e}"))
 }
 
+fn send_priority_fee_trans(priority_fee_lamports: u64) -> anyhow::Result<Signature> {
+    let (client, signer) = get_cli_and_signer()?;
+
+    let recent_blockhash = client
+        .get_latest_blockhash()
+        .map_err(|e| anyhow!("Failed to fetcu blockhash: {e}"))?;
+
+    let cu_budget: u64 = 400_000; // same as set_compute_unit_limit
+    let micro_lamports_per_cu = priority_fee_lamports.saturating_mul(1_000_000) / cu_budget.max(1);
+    let cu_limit_ix = ComputeBudgetInstruction::set_compute_unit_limit(cu_budget as u32);
+    let cu_price_ix = ComputeBudgetInstruction::set_compute_unit_price(micro_lamports_per_cu);
+
+    let memo_program_id = Pubkey::from_str("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")?;
+    let msg = "Solana workshop: transactions 0xDecadance";
+    let memo_ix = Instruction::new_with_bytes(memo_program_id, msg.as_bytes(), vec![]);
+
+    let tx = Transaction::new_signed_with_payer(
+        &[cu_price_ix, cu_limit_ix, memo_ix],
+        Some(&signer.pubkey()),
+        &[signer],
+        recent_blockhash,
+    );
+    let start = Instant::now();
+    let sig = client
+        .send_transaction(&tx)
+        .map_err(|e| anyhow!("Error sending tx {e}"))?;
+    client.confirm_transaction(&sig)?;
+    let elapsed_ms = start.elapsed().as_millis();
+    println!("\n===========tx: {}===========", &sig);
+    println!("tx confirm in {elapsed_ms} ms");
+    Ok(sig)
+}
+
 fn main() -> anyhow::Result<()> {
     let (client, wallet) = get_cli_and_signer()?;
 
-    // Homework 1: 3 reciver tx
+    // Homework 1-2 with sim: 3 reciver tx
     let tree_reciver_sig = tree_reciver_tx(&client, &wallet)?;
     print_tx_result(&client, &tree_reciver_sig)?;
+
+    // Homework 3: priority fee
+    let no_fee_tx = send_priority_fee_trans(0)?;
+    std::thread::sleep(Duration::from_secs(2));
+    print_tx_result(&client, &no_fee_tx)?;
+
+    let fee_tx = send_priority_fee_trans(1000)?;
+    std::thread::sleep(Duration::from_secs(2));
+    print_tx_result(&client, &fee_tx)?;
 
     return Ok(());
 
