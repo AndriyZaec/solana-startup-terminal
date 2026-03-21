@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use anyhow::{Ok, anyhow};
+use anyhow::{anyhow, Ok};
 use solana_cli_config::Config;
 use solana_client::{
     rpc_client::RpcClient,
@@ -84,9 +84,37 @@ fn get_cli_and_signer() -> anyhow::Result<(RpcClient, Keypair)> {
     Ok((client, wallet))
 }
 
+fn tree_reciver_tx(client: &RpcClient, signer: &Keypair) -> anyhow::Result<Signature> {
+    let reciver1_keys_path = format!("{}/local_wallet.json", env!("CARGO_MANIFEST_DIR"));
+    let reciver1 = Keypair::read_from_file(&reciver1_keys_path).map_err(|e| {
+        anyhow!(
+            "Failed to read keypair from file: {} and path {}",
+            e,
+            &reciver1_keys_path
+        )
+    })?;
+    let reciver2 = Pubkey::from_str("devwuNsNYACyiEYxRNqMNseBpNnGfnd4ZwNHL7sphqv")?;
+    let reciver3 = Keypair::new();
+
+    let transfer_amount = LAMPORTS_PER_SOL / 100;
+    let ix_1 = transfer(&signer.pubkey(), &reciver1.pubkey(), transfer_amount);
+    let ix_2 = transfer(&signer.pubkey(), &reciver2, transfer_amount);
+    let ix_3 = transfer(&signer.pubkey(), &reciver3.pubkey(), transfer_amount);
+
+    send_tx(client, signer, &[ix_1, ix_2, ix_3])
+}
+
 fn main() -> anyhow::Result<()> {
     let (client, wallet) = get_cli_and_signer()?;
-    let receiver = Keypair::new();
+
+    // Homework 1: 3 reciver tx
+    let tree_reciver_sig = tree_reciver_tx(&client, &wallet)?;
+    print_tx_result(&client, &tree_reciver_sig)?;
+
+    return Ok(());
+
+    let receiver = Keypair::read_from_file("local_wallet.json")
+        .map_err(|e| anyhow!("Failed to read keypair from file: {}", e))?;
 
     // 1. Відправка SOL
     println!("\n========================================");
