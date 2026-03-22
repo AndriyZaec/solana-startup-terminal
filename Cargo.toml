@@ -20,6 +20,7 @@ solana-account-decoder = "3.1.9"
 solana-system-interface = {version = "3.1.0", features = ["bincode"]}
 solana-compute-budget-interface = {version = "3.0.0"}
 solana-transaction-status = "3.1.9"
+solana-nonce = "3.0.0"
 
 anchor-client = "0.32.1"
 anchor-spl = "0.32.1"

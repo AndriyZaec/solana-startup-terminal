@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use anyhow::{anyhow, Ok};
+use anyhow::{anyhow, bail, Ok};
 use solana_cli_config::Config;
 use solana_client::{
     rpc_client::RpcClient,
@@ -11,15 +11,16 @@ use solana_client::{
     rpc_response::transaction::Transaction,
 };
 use solana_compute_budget_interface::ComputeBudgetInstruction;
+use solana_nonce::versions::Versions;
 use solana_sdk::{
-    message::Instruction,
+    message::{AccountMeta, Instruction},
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer},
     signer::EncodableKey,
 };
 
-use solana_system_interface::instruction::transfer;
+use solana_system_interface::instruction::{transfer, SystemInstruction};
 
 fn send_tx(
     client: &RpcClient,
@@ -168,6 +169,95 @@ fn send_priority_fee_trans(priority_fee_lamports: u64) -> anyhow::Result<Signatu
     Ok(sig)
 }
 
+fn durable_nonce_tx() -> anyhow::Result<Signature> {
+    let (client, signer) = get_cli_and_signer()?;
+
+    let nonce_acc_kp = Keypair::new();
+    let space = solana_nonce::state::State::size();
+    let lamps = client.get_minimum_balance_for_rent_exemption(space)?;
+    let create_acc_data = bincode::serialize(&SystemInstruction::CreateAccount {
+        lamports: lamps,
+        space: space as u64,
+        owner: solana_system_interface::program::id(),
+    })?;
+    let create_acc_ix = Instruction {
+        program_id: solana_system_interface::program::ID,
+        accounts: vec![
+            AccountMeta::new(signer.pubkey(), true),
+            AccountMeta::new(nonce_acc_kp.pubkey(), true),
+        ],
+        data: create_acc_data,
+    };
+
+    let init_du_data =
+        bincode::serialize(&SystemInstruction::InitializeNonceAccount(signer.pubkey()))?;
+    let init_du_ix = Instruction {
+        program_id: solana_system_interface::program::ID,
+        accounts: vec![
+            AccountMeta::new(nonce_acc_kp.pubkey(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::recent_blockhashes::id(), false),
+            AccountMeta::new_readonly(solana_sdk::sysvar::rent::id(), false),
+        ],
+        data: init_du_data,
+    };
+
+    let blockhash = client.get_latest_blockhash()?;
+    let pre_tx = Transaction::new_signed_with_payer(
+        &[create_acc_ix, init_du_ix],
+        Some(&signer.pubkey()),
+        &[&signer, &nonce_acc_kp],
+        blockhash,
+    );
+    _ = client
+        .send_and_confirm_transaction(&pre_tx)
+        .map_err(|e| anyhow!(e));
+
+    let nonce_data = client.get_account_data(&nonce_acc_kp.pubkey())?;
+    let nonce_parsed_data: Versions = bincode::deserialize(&nonce_data)?;
+    let nonce_hash = match nonce_parsed_data {
+        Versions::Legacy(state) => match state.as_ref() {
+            solana_nonce::state::State::Uninitialized => bail!("nonce acc not initalized"),
+            solana_nonce::state::State::Initialized(data) => data.blockhash(),
+        },
+        Versions::Current(state) => match state.as_ref() {
+            solana_nonce::state::State::Uninitialized => bail!("nonce acc not initalized"),
+            solana_nonce::state::State::Initialized(data) => data.blockhash(),
+        },
+    };
+    let adv_nonce_ix = solana_system_interface::instruction::advance_nonce_account(
+        &nonce_acc_kp.pubkey(),
+        &signer.pubkey(),
+    );
+
+    let memo_program_id = Pubkey::from_str("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")?;
+    let msg = "Solana workshop: Durable nonce transactions by 0xDecadance";
+    let memo_ix = Instruction::new_with_bytes(memo_program_id, msg.as_bytes(), vec![]);
+
+    let start = Instant::now();
+
+    let tx = Transaction::new_signed_with_payer(
+        &[adv_nonce_ix, memo_ix],
+        Some(&signer.pubkey()),
+        &[signer],
+        nonce_hash,
+    );
+
+    let elapsed_created_ms = start.elapsed().as_millis();
+    println!("\n=========tx created and signed in {elapsed_created_ms } ms============");
+
+    std::thread::sleep(Duration::from_secs(120));
+
+    let sig = client
+        .send_transaction(&tx)
+        .map_err(|e| anyhow!("Error sending tx {e}"))?;
+    client.confirm_transaction(&sig)?;
+    let elapsed_ms = start.elapsed().as_millis();
+    println!("\n===========tx: {}===========", &sig);
+    println!("tx send & confirm in {elapsed_ms} ms");
+
+    Ok(sig)
+}
+
 fn main() -> anyhow::Result<()> {
     let (client, wallet) = get_cli_and_signer()?;
 
@@ -183,6 +273,11 @@ fn main() -> anyhow::Result<()> {
     let fee_tx = send_priority_fee_trans(1000)?;
     std::thread::sleep(Duration::from_secs(2));
     print_tx_result(&client, &fee_tx)?;
+
+    // Homework 4: Durable nonce
+    let dn_tx = durable_nonce_tx()?;
+    std::thread::sleep(Duration::from_secs(2));
+    print_tx_result(&client, &dn_tx)?;
 
     return Ok(());
 
