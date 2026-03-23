@@ -5779,6 +5779,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
+ "solana-address-lookup-table-interface",
  "solana-cli-config",
  "solana-client",
  "solana-compute-budget-interface",

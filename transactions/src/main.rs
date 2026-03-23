@@ -4,6 +4,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Ok};
+use solana_address_lookup_table_interface::state::AddressLookupTable;
 use solana_cli_config::Config;
 use solana_client::{
     rpc_client::RpcClient,
@@ -13,11 +14,12 @@ use solana_client::{
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_nonce::versions::Versions;
 use solana_sdk::{
-    message::{AccountMeta, Instruction},
+    message::{v0, AccountMeta, AddressLookupTableAccount, Instruction, VersionedMessage},
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer},
     signer::EncodableKey,
+    transaction::{self, VersionedTransaction},
 };
 
 use solana_system_interface::instruction::{transfer, SystemInstruction};
@@ -258,6 +260,54 @@ fn durable_nonce_tx() -> anyhow::Result<Signature> {
     Ok(sig)
 }
 
+fn create_and_extend_alt(addresses: &[Pubkey]) -> anyhow::Result<Pubkey> {
+    let (client, signer) = get_cli_and_signer()?;
+
+    let commitment = CommitmentConfig::confirmed();
+    let slot = client.get_slot_with_commitment(commitment)?;
+    let (create_ix, alt_address) =
+        solana_address_lookup_table_interface::instruction::create_lookup_table(
+            signer.pubkey(),
+            signer.pubkey(),
+            slot,
+        );
+
+    let extend_ix = solana_address_lookup_table_interface::instruction::extend_lookup_table(
+        alt_address,
+        signer.pubkey(),
+        Some(signer.pubkey()),
+        addresses.to_vec(),
+    );
+
+    let bh = client.get_latest_blockhash()?;
+    let tx = transaction::Transaction::new_signed_with_payer(
+        &[create_ix, extend_ix],
+        Some(&signer.pubkey()),
+        &[&signer],
+        bh,
+    );
+    client.send_and_confirm_transaction(&tx)?;
+
+    Ok(alt_address)
+}
+
+fn send_v0_with_alt(ixs: &[Instruction], alt_address: Pubkey) -> anyhow::Result<Signature> {
+    let (client, signer) = get_cli_and_signer()?;
+    let raw_data = client.get_account_data(&alt_address)?;
+    let alt_state = AddressLookupTable::deserialize(&raw_data)?;
+    let alt_acc = AddressLookupTableAccount {
+        key: alt_address,
+        addresses: alt_state.addresses.to_vec(),
+    };
+
+    let bh = client.get_latest_blockhash()?;
+    let msg = v0::Message::try_compile(&signer.pubkey(), ixs, &[alt_acc], bh)?;
+    let vtx = VersionedTransaction::try_new(VersionedMessage::V0(msg), &[&signer])?;
+    client
+        .send_and_confirm_transaction(&vtx)
+        .map_err(|e| e.into())
+}
+
 fn main() -> anyhow::Result<()> {
     let (client, wallet) = get_cli_and_signer()?;
 
@@ -278,6 +328,24 @@ fn main() -> anyhow::Result<()> {
     let dn_tx = durable_nonce_tx()?;
     std::thread::sleep(Duration::from_secs(2));
     print_tx_result(&client, &dn_tx)?;
+
+    // Homework 5: ALT
+    let reciver1_keys_path = format!("{}/local_wallet.json", env!("CARGO_MANIFEST_DIR"));
+    let reciver1 = Keypair::read_from_file(&reciver1_keys_path).map_err(|e| {
+        anyhow!(
+            "Failed to read keypair from file: {} and path {}",
+            e,
+            &reciver1_keys_path
+        )
+    })?;
+    let alt_address = create_and_extend_alt(&[reciver1.pubkey()])?;
+    let user_ix = transfer(
+        &wallet.pubkey(),
+        &reciver1.pubkey(),
+        100_000, // lamports
+    );
+    let alt_tx = send_v0_with_alt(&[user_ix], alt_address)?;
+    println!("=======ATL TX: {}=========", alt_tx);
 
     return Ok(());
 
